@@ -32,23 +32,19 @@ type consumer struct {
 func (c *consumer) NotifyConnErr(notifyConnErr chan<- *RabbitMQError) {
 	c.notify.Lock()
 	defer c.notify.Unlock()
-	if c.notifyConnErr != nil {
-		close(c.notifyConnErr)
-	}
-	if notifyConnErr != nil {
-		c.notifyConnErr = notifyConnErr
-	}
+	//if c.notifyConnErr != nil {
+	//	close(c.notifyConnErr)
+	//}
+	c.notifyConnErr = notifyConnErr
 }
 
 func (c *consumer) NotifyHandlerErr(notifyHandlerErr chan<- *RabbitMQError) {
 	c.notify.Lock()
 	defer c.notify.Unlock()
-	if c.notifyHandlerErr != nil {
-		close(c.notifyHandlerErr)
-	}
-	if notifyHandlerErr != nil {
-		c.notifyHandlerErr = notifyHandlerErr
-	}
+	//if c.notifyHandlerErr != nil {
+	//	close(c.notifyHandlerErr)
+	//}
+	c.notifyHandlerErr = notifyHandlerErr
 }
 
 func (c *consumer) reConnection() {

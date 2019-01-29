@@ -33,12 +33,10 @@ type producer struct {
 func (p *producer) NotifyConnErr(notifyConnErr chan<- *RabbitMQError) {
 	p.notify.Lock()
 	defer p.notify.Unlock()
-	if p.notifyConnErr != nil {
-		close(p.notifyConnErr)
-	}
-	if notifyConnErr != nil {
-		p.notifyConnErr = notifyConnErr
-	}
+	//if p.notifyConnErr != nil {
+	//	close(p.notifyConnErr)
+	//}
+	p.notifyConnErr = notifyConnErr
 }
 
 func (p *producer) reConnection() {

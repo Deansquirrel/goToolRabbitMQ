@@ -75,6 +75,8 @@ func NewRabbitMQ(config *RabbitMQConfig) (*RabbitMQ, error) {
 		WaitConfirmTimeout: WaitConfirmTimeout,
 		ConnectTimeout:     ConnectTimeout,
 
+		notifyErr:nil,
+
 		pList: make(map[string]*producer),
 		cList: make(map[string]*consumer),
 	}
@@ -96,9 +98,7 @@ func (r *RabbitMQ) NotifyErr(notifyErr chan *RabbitMQError) {
 	if r.notifyErr != nil {
 		close(r.notifyErr)
 	}
-	if notifyErr != nil {
-		r.notifyErr = notifyErr
-	}
+	r.notifyErr = notifyErr
 }
 
 func (r *RabbitMQ) getConn() (*amqp.Connection, error) {
@@ -261,10 +261,10 @@ connectCheck:
 			return errors.New("producer content timeout")
 		default:
 			if p.isConnected {
+				p.NotifyConnErr(nil)
 				timer.Stop()
 				close(errCh)
 				close(timeoutCh)
-				p.NotifyConnErr(nil)
 				if r.notifyErr != nil {
 					p.NotifyConnErr(r.notifyErr)
 				}
@@ -347,11 +347,11 @@ connectCheck:
 			return errors.New("producer content timeout")
 		default:
 			if c.isConnected && c.isHandled {
+				c.NotifyHandlerErr(nil)
+				c.NotifyConnErr(nil)
 				timer.Stop()
 				close(errCh)
 				close(timeoutCh)
-				c.NotifyHandlerErr(nil)
-				c.NotifyConnErr(nil)
 				if r.notifyErr != nil {
 					c.NotifyConnErr(r.notifyErr)
 					c.NotifyHandlerErr(r.notifyErr)
