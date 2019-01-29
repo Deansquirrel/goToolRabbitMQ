@@ -2,35 +2,72 @@ package goToolRabbitMQ
 
 import (
 	"context"
-	"errors"
+	log "github.com/Deansquirrel/goToolLog"
 	"github.com/streadway/amqp"
+	"sync"
 	"time"
 )
 
 type consumer struct {
-	Tag string
-	QueueName string
-	f func(string)
-	ConnStr string
-	connection *amqp.Connection
-	channel *amqp.Channel
-	notifyClose chan *amqp.Error
-	isConnected bool
-	isHandled bool
+	Tag            string
+	QueueName      string
+	f              func(string)
+	ConnStr        string
+	connection     *amqp.Connection
+	channel        *amqp.Channel
+	notifyClose    chan *amqp.Error
+	isConnected    bool
+	isHandled      bool
 	reConnectDelay time.Duration
-	lastConnErr error
-	ctx context.Context
-	cancelFunc context.CancelFunc
+	//lastConnErr error
+	//lastHandlerErr error
+	notifyConnErr    chan<- *RabbitMQError
+	notifyHandlerErr chan<- *RabbitMQError
+	ctx              context.Context
+	cancelFunc       context.CancelFunc
+
+	notify sync.RWMutex
 }
 
-func(c *consumer)reConnection(){
+func (c *consumer) NotifyConnErr(notifyConnErr chan<- *RabbitMQError) {
+	c.notify.Lock()
+	defer c.notify.Unlock()
+	if c.notifyConnErr != nil {
+		close(c.notifyConnErr)
+	}
+	if notifyConnErr != nil {
+		c.notifyConnErr = notifyConnErr
+	}
+}
+
+func (c *consumer) NotifyHandlerErr(notifyHandlerErr chan<- *RabbitMQError) {
+	c.notify.Lock()
+	defer c.notify.Unlock()
+	if c.notifyHandlerErr != nil {
+		close(c.notifyHandlerErr)
+	}
+	if notifyHandlerErr != nil {
+		c.notifyHandlerErr = notifyHandlerErr
+	}
+}
+
+func (c *consumer) reConnection() {
 	for {
 		c.isConnected = false
 		var err error
-		for{
+		for {
 			err = c.connect()
 			if err != nil {
-				c.lastConnErr = err
+				//c.lastConnErr = err
+				log.Debug(err.Error())
+				if c.notifyConnErr != nil {
+					e := RabbitMQError{
+						Tag:   c.Tag,
+						Type:  ErrorTypeConsumer,
+						Error: err,
+					}
+					c.notifyConnErr <- &e
+				}
 				time.Sleep(c.reConnectDelay)
 			} else {
 				break
@@ -44,52 +81,57 @@ func(c *consumer)reConnection(){
 	}
 }
 
-func(c *consumer)connect()error{
-	conn,err := amqp.Dial(c.ConnStr)
+func (c *consumer) connect() error {
+	log.Debug("RabbitMQ Consumer connecting")
+	conn, err := amqp.Dial(c.ConnStr)
 	if err != nil {
 		return err
 	}
-	ch,err := conn.Channel()
+	ch, err := conn.Channel()
 	if err != nil {
 		return err
 	}
-	c.changeConnection(conn,ch)
-	b,err := c.handleTest()
-	if !b {
-		return errors.New("handle test err" + err.Error())
-	}
+	c.changeConnection(conn, ch)
 	c.isConnected = true
-	c.lastConnErr = nil
+	log.Debug("RabbitMQ Consumer connected")
 	return nil
 }
 
-func(c *consumer)changeConnection(connection *amqp.Connection, channel *amqp.Channel){
+func (c *consumer) changeConnection(connection *amqp.Connection, channel *amqp.Channel) {
 	c.connection = connection
 	c.channel = channel
 	c.notifyClose = make(chan *amqp.Error)
 	c.channel.NotifyClose(c.notifyClose)
 }
 
-func(c *consumer)handleTest()(bool,error){
-	err := c.startHandler()
-	if err != nil {
-		return false,err
-	} else {
-		return true,nil
-	}
-}
-
-func(c *consumer)reStartHandler(){
-	for{
+func (c *consumer) reStartHandler() {
+	for {
 		c.isHandled = false
-		for{
+		var err error
+		for {
 			if !c.isConnected {
 				time.Sleep(c.reConnectDelay)
 			} else {
-				break
+				err = c.startHandler()
+				if err != nil {
+					//c.lastHandlerErr = err
+					log.Debug(err.Error())
+					if c.notifyHandlerErr != nil {
+						e := RabbitMQError{
+							Tag:   c.Tag,
+							Type:  ErrorTypeConsumer,
+							Error: err,
+						}
+						c.notifyHandlerErr <- &e
+					}
+					time.Sleep(c.reConnectDelay)
+				} else {
+					//c.lastHandlerErr = nil
+					break
+				}
 			}
 		}
-		select{
+		select {
 		case <-c.ctx.Done():
 			return
 		case <-c.notifyClose:
@@ -97,23 +139,25 @@ func(c *consumer)reStartHandler(){
 	}
 }
 
-func(c *consumer)startHandler()error{
-	chanD,err := c.channel.Consume(c.QueueName,c.Tag,true,false,false,false,nil)
+func (c *consumer) startHandler() error {
+	chanD, err := c.channel.Consume(c.QueueName, c.Tag, true, false, false, false, nil)
 	if err != nil {
 		return err
 	}
-	go c.handler(chanD,c.f)
+	go c.handler(chanD, c.f)
 	c.isHandled = true
 	return nil
 }
 
-func (c *consumer)handler(deliveries <-chan amqp.Delivery,f func(string)){
-	for d:= range deliveries {
+func (c *consumer) handler(deliveries <-chan amqp.Delivery, f func(string)) {
+	log.Debug("RabbitMQ Consumer Handler Begin")
+	defer log.Debug("RabbitMQ Consumer Handler End")
+	for d := range deliveries {
 		f(string(d.Body))
 	}
 }
 
-func (c *consumer)Close() error {
+func (c *consumer) Close() error {
 	c.cancelFunc()
 	if !c.isConnected {
 		return nil
